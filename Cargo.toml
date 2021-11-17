@@ -1,0 +1,23 @@
+[package]
+name = "keytree"
+version = "0.1.0"
+authors = ["Dan Aloni <alonid@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+cairo-rs = { version = "0.9", features = ["xcb"] }
+cairo-sys-rs = { version = "0.10", features = ["xcb"] }
+config = "0.10"
+dirs = "3"
+error-chain = "0.11.0"
+image = "0.18.0"
+lazy_static = "1.4"
+log = "0.4"
+pango = "0.9"
+pangocairo = "0.10"
+regex = "1.5"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.8"
+structopt = "0.3"
+thiserror = "1"
+xcb = { version = "0.9", features = ["randr"] }
