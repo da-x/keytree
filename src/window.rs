@@ -5,7 +5,7 @@ use crate::leechbar::component::text::Text;
 use crate::{cmdline, leechbar};
 
 pub(crate) struct Window {
-    win: u32,
+    id: u32,
     frame: u32,
     black: u32,
     window_pict: u32,
@@ -17,6 +17,10 @@ pub(crate) struct Window {
 }
 
 impl Window {
+    pub(crate) fn id(&self) -> u32 {
+        self.id
+    }
+
     pub(crate) fn new(main: &crate::Main, text: &str) -> Result<Window, Error> {
         let conn = main.conn.clone();
         let largest_window = main.largest_window;
@@ -97,7 +101,7 @@ impl Window {
         conn.flush();
 
         let win = Window {
-            win,
+            id: win,
             frame: main.frame,
             black: main.black,
             window_pict,
@@ -120,14 +124,14 @@ impl Window {
         let total_width = text_width + (main.border_pad + main.border_size) * 2;
         let total_height = text_height + (main.border_pad + main.border_size) * 2;
 
-        let gcontext = leechbar::util::window::create_gc_32(&conn, self.win)?;
+        let gcontext = leechbar::util::window::create_gc_32(&conn, self.id)?;
         let geometry = leechbar::util::Geometry::new(0, 0, text_width, text_height);
         let color = leechbar::util::Color::new(255, 255, 255, 255);
         let text = Text::new(
             conn.clone(),
             geometry,
             gcontext,
-            self.win,
+            self.id,
             main.format32,
             &text,
             &main.pango_font,
@@ -142,7 +146,7 @@ impl Window {
 
         xcb::configure_window(
             &conn,
-            self.win,
+            self.id,
             &[
                 (xcb::CONFIG_WINDOW_WIDTH as u16, total_width as u32),
                 (xcb::CONFIG_WINDOW_HEIGHT as u16, total_height as u32),
@@ -157,7 +161,7 @@ impl Window {
     pub(crate) fn draw(&self, conn: &Connection) -> Result<(), Error> {
         crate::leechbar::util::draw::draw_text_box(
             &conn,
-            self.win,
+            self.id,
             self.frame,
             self.black,
             self.window_pict,
@@ -173,7 +177,7 @@ impl Window {
 
     pub(crate) fn destroy(&self, conn: &Connection) -> Result<(), Error> {
         xcb::render::free_picture_checked(conn, self.window_pict);
-        xcb::destroy_window_checked(conn, self.win);
+        xcb::destroy_window_checked(conn, self.id);
         conn.flush();
         Ok(())
     }
