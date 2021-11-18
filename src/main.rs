@@ -233,11 +233,22 @@ impl Main {
         }
 
         let mut win: Option<Window> = None;
+        let mut error_win: Option<Window> = None;
+        let mut error_start: Option<std::time::Instant> = None;
         let mut prev_focus = None;
         let mut running = true;
 
         while running || win.is_some() {
             std::thread::sleep(Duration::from_millis(10));
+
+            if let Some(error_start_v) = error_start {
+                if error_start_v.elapsed() >= std::time::Duration::from_millis(1000) {
+                    if let Some(error_win) = &error_win {
+                        error_win.destroy(&self.conn)?;
+                    }
+                    error_start = None;
+                }
+            }
 
             let event = if let Some(event) = self.conn.poll_for_event() {
                 event
@@ -248,8 +259,14 @@ impl Main {
             let r = event.response_type() & !0x80;
             match r {
                 xcb::CONFIGURE_NOTIFY => {
-                    if let Some(win) = &win {
-                        win.draw(&self.conn)?;
+                    let event: &xcb::ConfigureNotifyEvent = unsafe { xcb::cast_event(&event) };
+
+                    for win in [&win, &error_win] {
+                        if let Some(win) = win {
+                            if win.id() == event.event() {
+                                win.draw(&self.conn)?;
+                            }
+                        }
                     }
                 }
                 xcb::KEY_PRESS => {
@@ -309,9 +326,19 @@ impl Main {
                                         cmd.spawn()?;
                                     }
                                     Op::Reload(_) => {
-                                        if let Ok(config) = Main::load_config(&self.opt) {
-                                            self.config = config;
-                                            break;
+                                        match Main::load_config(&self.opt) {
+                                            Ok(config) => {
+                                                self.config = config;
+                                                break;
+                                            }
+                                            Err(err) => {
+                                                let text = format!("{}", err);
+                                                if error_win.is_none() {
+                                                    error_win = Some(Window::new(self, &text)?);
+                                                    error_start = Some(std::time::Instant::now());
+                                                }
+                                                break;
+                                            }
                                         }
                                     }
                                     Op::Die(_) => {
@@ -344,15 +371,26 @@ impl Main {
                     }
                 }
                 xcb::DESTROY_NOTIFY => {
-                    if let Some((focus, revert)) = prev_focus {
-                        log::debug!("Reverting focus");
+                    let event: &xcb::DestroyNotifyEvent = unsafe { xcb::cast_event(&event) };
 
-                        xcb::set_input_focus(&self.conn, revert, focus, xcb::CURRENT_TIME)
-                            .request_check()?;
-                        self.conn.flush();
+                    if let Some(_win) = &win {
+                        if let Some((focus, revert)) = prev_focus {
+                            log::debug!("Reverting focus");
+
+                            xcb::set_input_focus(&self.conn, revert, focus, xcb::CURRENT_TIME)
+                                .request_check()?;
+                            self.conn.flush();
+                        }
                     }
 
-                    win = None;
+                    for win_opt in [&mut win, &mut error_win] {
+                        if let Some(win) = win_opt {
+                            if win.id() == event.event() {
+                                *win_opt = None;
+                                break;
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
