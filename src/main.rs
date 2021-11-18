@@ -24,7 +24,9 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::keysym::KeySym;
 use crate::window::Window;
+use crate::cmdline::Opt;
 use ::config as config_crate;
+
 
 struct Main {
     border_size: u16,
@@ -112,6 +114,31 @@ impl Main {
         Ok(())
     }
 
+    fn load_config(opt: &Opt) -> Result<Config, Error> {
+        let config_path = if let Some(config) = &opt.config {
+            config.clone()
+        } else {
+            if let Ok(path) = std::env::var("KEYTREE_CONFIG_PATH") {
+                PathBuf::from(path)
+            } else {
+                if let Some(dir) = dirs::config_dir() {
+                    dir.join("keytree").join("config.yaml")
+                } else {
+                    return Err(Error::NoConfig);
+                }
+            }
+        };
+
+        let file = config_crate::File::new(
+            config_path.to_str().unwrap(),
+            config_crate::FileFormat::Yaml,
+        );
+        let mut settings = config_crate::Config::default();
+        settings.merge(file)?;
+        let config = settings.try_into::<Config>()?;
+        Ok(config)
+    }
+
     fn load_keycode_to_keysyms(&mut self) -> Result<(), Error> {
         let setup = self.conn.get_setup();
         let data = xcb::get_keyboard_mapping(
@@ -195,7 +222,7 @@ impl Main {
         Ok(())
     }
 
-    fn looping(&self) -> Result<(), Error> {
+    fn looping(&mut self) -> Result<(), Error> {
         let mut key_map = self.config.map.clone();
 
         // Grab root keys
@@ -282,7 +309,10 @@ impl Main {
                                         cmd.spawn()?;
                                     }
                                     Op::Reload(_) => {
-                                        // TODO
+                                        if let Ok(config) = Main::load_config(&self.opt) {
+                                            self.config = config;
+                                            break;
+                                        }
                                     }
                                     Op::Die(_) => {
                                         running = false;
@@ -353,7 +383,7 @@ impl Main {
         m
     }
 
-    fn new(opt: &cmdline::Opt, config: Config) -> Result<Self, Error> {
+    fn new(opt: &Opt, config: Config) -> Result<Self, Error> {
         let (conn, screen_num) = xcb::Connection::connect(None).unwrap();
         let conn = Arc::new(conn);
         let setup = conn.get_setup();
@@ -438,34 +468,13 @@ impl Main {
 }
 
 fn main_wrap() -> Result<(), Error> {
-    let opt = cmdline::Opt::from_args();
+    let opt = Opt::from_args();
     if opt.example_config {
         print!("{}", serde_yaml::to_string(&config::example())?);
         return Ok(());
     }
 
-    let config_path = if let Some(config) = &opt.config {
-        config.clone()
-    } else {
-        if let Ok(path) = std::env::var("KITAP_CONFIG_PATH") {
-            PathBuf::from(path)
-        } else {
-            if let Some(dir) = dirs::config_dir() {
-                dir.join("keytree").join("config.yaml")
-            } else {
-                return Err(Error::NoConfig);
-            }
-        }
-    };
-
-    let file = config_crate::File::new(
-        config_path.to_str().unwrap(),
-        config_crate::FileFormat::Yaml,
-    );
-    let mut settings = config_crate::Config::default();
-    settings.merge(file)?;
-    let start_config = settings.try_into::<Config>()?;
-    let mut main = Main::new(&opt, start_config)?;
+    let mut main = Main::new(&opt, Main::load_config(&opt)?)?;
 
     main.load_keycode_to_keysyms()?;
     main.load_modifier_maps()?;
