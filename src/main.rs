@@ -47,6 +47,7 @@ struct Main {
     keycode_to_keysym: Vec<KeySym>,
     keysym_to_keycode: HashMap<KeySym, u8>,
 
+    children_to_collect: Vec<std::process::Child>,
     largest_window: ((i16, i16), (u16, u16)),
     pango_font: pango::FontDescription,
     conn: Arc<Connection>,
@@ -320,10 +321,20 @@ impl Main {
 
                                 match op {
                                     Op::Execute(e) => {
+                                        let mut still_existing = vec![];
+                                        for mut child in self.children_to_collect.drain(..) {
+                                            if let Ok(Some(_)) =  child.try_wait() {
+                                                // Zombie collected
+                                            } else {
+                                                still_existing.push(child);
+                                            }
+                                        }
                                         let mut cmd = std::process::Command::new("sh");
                                         cmd.arg("-c");
                                         cmd.arg(e);
-                                        cmd.spawn()?;
+                                        let child = cmd.spawn()?;
+                                        self.children_to_collect = still_existing;
+                                        self.children_to_collect.push(child);
                                     }
                                     Op::Reload(_) => {
                                         match Main::load_config(&self.opt) {
@@ -473,6 +484,7 @@ impl Main {
         Ok(Self {
             keycode_to_keysym: vec![],
             keysym_to_keycode: HashMap::new(),
+            children_to_collect: vec![],
             meta_mod_mask: 0,
             alt_mod_mask: 0,
             super_mod_mask: 0,
