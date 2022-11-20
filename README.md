@@ -18,11 +18,10 @@ bind key sequences.  In contrast, developer IDEs allow to bind key combination
 - On-screen display of 'next key' help while keys are being handled.
 
 
-## TO-DO
+## To Do
 
 Various features can extensions can be implemented:
 
-- Implement the 'Reload' action.
 - Improve OSD window appearance.
 - Implement 'Eval' action so that actions can dynamically extend the tree, without relying on the fixed documentation.
 - Allow defining default and inheritable action for a mistyping of a combination on any level: Cancel, Return, Nothing, or custom program invocation.
