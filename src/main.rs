@@ -228,9 +228,11 @@ impl Main {
 
         // Grab root keys
         for (comb, _action) in self.config.map.iter() {
-            let comb = Combination::parse(comb)?;
-            println!("Grabbing {}", comb);
-            self.key_grabbing(comb.key, comb.modifiers, KeyGrabbing::Grab)?;
+            for key in comb.split(",") {
+                let comb = Combination::parse(key)?;
+                println!("Grabbing {}", comb);
+                self.key_grabbing(comb.key, comb.modifiers, KeyGrabbing::Grab)?;
+            }
         }
 
         let mut win: Option<Window> = None;
@@ -286,11 +288,21 @@ impl Main {
                         modifiers: self.x11_to_mask(state),
                     };
 
-                    let combination_str = format!("{}", combination);
+                    let mut combination_str = format!("{}", combination);
                     log::info!("Received: {}", combination_str);
 
                     let mut revert = false;
                     let mut take_focus = None;
+
+                    // If it is part of a A,B, change combination_str to A,B.
+                    for item in key_map.keys() {
+                        for item2 in item.split(",") {
+                            if item2 == combination_str {
+                                combination_str = item.to_owned();
+                                break;
+                            }
+                        }
+                    }
 
                     if let Some(desc) = key_map.get(&combination_str) {
                         if let Some(m) = desc.action.action_map() {

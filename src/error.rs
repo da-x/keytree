@@ -26,8 +26,8 @@ pub(crate) enum Error {
     #[error("Invalid position specified")]
     InvalidPosition,
 
-    #[error("Unknown key")]
-    UnknownKey,
+    #[error("Unknown key: {0}")]
+    UnknownKey(String),
 
     #[error("Configuration not provided, run with --help")]
     NoConfig,

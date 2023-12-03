@@ -61,7 +61,7 @@ impl Combination {
                 modifiers: mods,
             })
         } else {
-            Err(Error::UnknownKey)
+            Err(Error::UnknownKey(s.to_owned()))
         }
     }
 }
