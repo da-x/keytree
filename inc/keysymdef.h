@@ -329,6 +329,7 @@ SOFTWARE.
 #define XK_Hyper_R                       0xffee  /* Right hyper */
 #endif /* XK_MISCELLANY */
 
+#define XK_XF86_Editor                   0x100811a6
 /*
  * Keyboard (XKB) Extension function and modifier keys
  * (from Appendix C of "The X Keyboard Extension: Protocol Specification")
