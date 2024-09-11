@@ -48,7 +48,6 @@ struct Main {
     keysym_to_keycode: HashMap<KeySym, u8>,
 
     children_to_collect: Vec<std::process::Child>,
-    largest_window: ((i16, i16), (u16, u16)),
     pango_font: pango::FontDescription,
     conn: Arc<Connection>,
     opt: cmdline::Opt,
@@ -491,8 +490,6 @@ impl Main {
         )
         .request_check()?;
 
-        let largest_window = crate::leechbar::util::window::get_largest_window(&conn, &screen)?;
-
         Ok(Self {
             keycode_to_keysym: vec![],
             keysym_to_keycode: HashMap::new(),
@@ -510,7 +507,6 @@ impl Main {
             screen_num,
             border_size,
             border_pad,
-            largest_window,
             conn,
             pango_font,
             opt: opt.clone(),

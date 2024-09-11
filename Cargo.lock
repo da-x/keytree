@@ -522,6 +522,7 @@ dependencies = [
  "pangocairo",
  "regex",
  "serde 1.0.125",
+ "serde_json",
  "serde_yaml",
  "structopt",
  "thiserror",

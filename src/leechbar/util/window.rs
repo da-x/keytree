@@ -1,11 +1,47 @@
-use xcb::{randr, xproto::Screen, Connection};
+use std::{io::BufRead, path::{Path, PathBuf}};
 
+use xcb::{randr, xproto::Screen, Connection};
+use serde::Deserialize;
 use crate::error::Error;
 
-pub(crate) fn get_largest_window(
-    conn: &Connection,
-    screen: &Screen,
-) -> Result<((i16, i16), (u16, u16)), Error> {
+#[derive(Deserialize, Debug)]
+pub struct Display {
+    #[allow(unused)] // TODO
+    name: String,
+    pub x: i32,
+    pub y: i32,
+    pub height: i32,
+    pub width: i32,
+}
+
+pub fn xrandr_cache() -> Result<PathBuf, Error> {
+    let xdg = PathBuf::from(std::env::var("XDG_RUNTIME_DIR")?);
+    Ok(xdg.join("xrandr-cache.json"))
+}
+
+pub fn read_displays_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<Display>, Error> {
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut displays = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let display: Display = serde_json::from_str(&line)
+            .expect("Failed to parse the line as a Display");
+        displays.push(display);
+    }
+
+    Ok(displays)
+}
+
+pub(crate) fn get_screens(conn: &Connection, screen: &Screen)
+     -> Result<Vec<Display>, Error>
+{
+    let mut screens = vec![];
+    if let Ok(displays) = read_displays_from_file(&xrandr_cache()?) {
+        return Ok(displays);
+    }
+
     let window_dummy = conn.generate_id();
 
     xcb::create_window(
@@ -33,20 +69,38 @@ pub(crate) fn get_largest_window(
         crtc_cookies.push(randr::get_crtc_info(&conn, *crtc, 0));
     }
 
-    let mut res = Err(Error::NoScreenFound);
-    let mut size = 0 as u64;
-
     for crtc_cookie in crtc_cookies.into_iter() {
         if let Ok(reply) = crtc_cookie.get_reply() {
-            let pixels = reply.width() as u64 * reply.height() as u64;
-            if pixels > size {
-                size = pixels;
-                res = Ok(((reply.x(), reply.y()), (reply.width(), reply.height())));
-            }
+            screens.push(Display {
+                name: "".to_owned(),
+                x: reply.x() as i32,
+                y: reply.y() as i32,
+                height: reply.height() as i32,
+                width: reply.width() as i32,
+            });
         }
     }
 
     xcb::destroy_window(&conn, window_dummy);
+
+    Ok(screens)
+}
+
+pub(crate) fn get_largest_window(
+    conn: &Connection,
+    screen: &Screen,
+) -> Result<((i32, i32), (i32, i32)), Error> {
+    let screens = get_screens(conn, screen)?;
+    let mut res = Err(Error::NoScreenFound);
+    let mut size = 0;
+
+    for screen in screens.into_iter() {
+        let pixels = screen.width as u64 * screen.width as u64;
+        if pixels > size {
+            size = pixels;
+            res = Ok(((screen.x, screen.y), (screen.width, screen.height)));
+        }
+    }
 
     res
 }

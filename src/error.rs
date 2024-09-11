@@ -29,6 +29,9 @@ pub(crate) enum Error {
     #[error("Unknown key: {0}")]
     UnknownKey(String),
 
+    #[error("Var error: {0}")]
+    VarError(#[from] std::env::VarError),
+
     #[error("Configuration not provided, run with --help")]
     NoConfig,
 }

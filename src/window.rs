@@ -23,9 +23,9 @@ impl Window {
 
     pub(crate) fn new(main: &crate::Main, text: &str) -> Result<Window, Error> {
         let conn = main.conn.clone();
-        let largest_window = main.largest_window;
         let setup = conn.get_setup();
         let screen = setup.roots().nth(main.screen_num as usize).unwrap();
+        let largest_window = crate::leechbar::util::window::get_largest_window(&conn, &screen)?;
 
         let (text_width, text_height) =
             leechbar::component::text::text_size(&text, &main.pango_font).unwrap();
@@ -33,11 +33,11 @@ impl Window {
         let total_height = text_height + (main.border_pad + main.border_size) * 2;
         let win = conn.generate_id();
         let (pos_x, pos_y) = if let Some((pos_x, pos_y)) = main.opt.position.split_once(",") {
-            let x = cmdline::parse_position(pos_x, total_width, largest_window.1 .0)?;
-            let y = cmdline::parse_position(pos_y, total_height, largest_window.1 .1)?;
+            let x = cmdline::parse_position(pos_x, total_width, largest_window.1 .0 as u16)?;
+            let y = cmdline::parse_position(pos_y, total_height, largest_window.1 .1 as u16)?;
             (
-                (largest_window.0 .0 + x) as i16,
-                (largest_window.0 .1 + y) as i16,
+                (largest_window.0 .0 as i16 + x) as i16,
+                (largest_window.0 .1 as i16 + y) as i16,
             )
         } else {
             return Err(Error::InvalidPosition);
