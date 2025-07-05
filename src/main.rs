@@ -60,6 +60,20 @@ enum KeyGrabbing {
     Ungrab,
 }
 
+enum KeyTreeEvent {
+    ConfigureNotify {
+        event: u32,
+    },
+    KeyPress {
+        key: KeySym,
+        state: u32,
+    },
+    DestroyNotify {
+        event: u32,
+    },
+    Other,
+}
+
 impl Main {
     fn key_grabbing(
         &self,
@@ -258,29 +272,20 @@ impl Main {
                 continue;
             };
 
-            let r = event.response_type() & !0x80;
-            match r {
-                xcb::CONFIGURE_NOTIFY => {
-                    let event: &xcb::ConfigureNotifyEvent = unsafe { xcb::cast_event(&event) };
-
+            match self.classify_event(&event) {
+                KeyTreeEvent::ConfigureNotify { event } => {
                     for win in [&win, &error_win] {
                         if let Some(win) = win {
-                            if win.id() == event.event() {
+                            if win.id() == event {
                                 win.draw(&self.conn)?;
                             }
                         }
                     }
                 }
-                xcb::KEY_PRESS => {
-                    let event: &xcb::KeyPressEvent = unsafe { xcb::cast_event(&event) };
-                    let key = self.keycode_to_keysym[event.detail() as usize];
-
+                KeyTreeEvent::KeyPress { key, state } => {
                     if keysym::is_modifier(key) {
                         continue;
                     }
-
-                    let state = event.state() as u32
-                        & !(xcb::MOD_MASK_LOCK | self.num_lock_mask | self.scroll_lock_mask);
 
                     let combination = Combination {
                         key,
@@ -392,9 +397,7 @@ impl Main {
                         key_map = take_focus.clone();
                     }
                 }
-                xcb::DESTROY_NOTIFY => {
-                    let event: &xcb::DestroyNotifyEvent = unsafe { xcb::cast_event(&event) };
-
+                KeyTreeEvent::DestroyNotify { event } => {
                     if let Some(_win) = &win {
                         if let Some((focus, revert)) = prev_focus {
                             log::debug!("Reverting focus");
@@ -407,14 +410,14 @@ impl Main {
 
                     for win_opt in [&mut win, &mut error_win] {
                         if let Some(win) = win_opt {
-                            if win.id() == event.event() {
+                            if win.id() == event {
                                 *win_opt = None;
                                 break;
                             }
                         }
                     }
                 }
-                _ => {}
+                KeyTreeEvent::Other => {}
             }
         }
 
@@ -521,6 +524,28 @@ impl Main {
             hyper: mask & self.hyper_mod_mask != 0,
             superr: mask & self.super_mod_mask != 0,
             meta: mask & self.meta_mod_mask != 0,
+        }
+    }
+
+    fn classify_event(&self, event: &xcb::GenericEvent) -> KeyTreeEvent {
+        let r = event.response_type() & !0x80;
+        match r {
+            xcb::CONFIGURE_NOTIFY => {
+                let event: &xcb::ConfigureNotifyEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::ConfigureNotify { event: event.event() }
+            }
+            xcb::KEY_PRESS => {
+                let event: &xcb::KeyPressEvent = unsafe { xcb::cast_event(event) };
+                let key = self.keycode_to_keysym[event.detail() as usize];
+                let state = event.state() as u32
+                    & !(xcb::MOD_MASK_LOCK | self.num_lock_mask | self.scroll_lock_mask);
+                KeyTreeEvent::KeyPress { key, state }
+            }
+            xcb::DESTROY_NOTIFY => {
+                let event: &xcb::DestroyNotifyEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::DestroyNotify { event: event.event() }
+            }
+            _ => KeyTreeEvent::Other,
         }
     }
 }
