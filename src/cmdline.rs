@@ -4,8 +4,17 @@ use structopt::StructOpt;
 
 #[derive(StructOpt, Debug, Clone)]
 pub(crate) struct Opt {
-    #[structopt(name = "config-file", short = "c")]
+    #[structopt(long, short = "c")]
     pub config: Option<PathBuf>,
+
+    /// Instead of global key grab for root key, assume this root key sequence was hit.
+    /// Allows integrating well with Wayland, which does not allow (or easily allow)
+    /// global key grabbing.
+    ///
+    /// In this mode we will also not deamonize, but instead exit when the key sequence
+    /// finished processing.
+    #[structopt(long, short = "r")]
+    pub root_key: Option<String>,
 
     /// Font to use (Pango font string, for example "normal 100" for big text)
     #[structopt(long = "font", short = "n", default_value = "normal 25")]

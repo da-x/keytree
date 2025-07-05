@@ -238,13 +238,29 @@ impl Main {
 
     fn looping(&mut self) -> Result<(), Error> {
         let mut key_map = self.config.map.clone();
+        let mut root_key_hit = None;
 
-        // Grab root keys
-        for (comb, _action) in self.config.map.iter() {
-            for key in comb.split(",") {
-                let comb = Combination::parse(key)?;
-                println!("Grabbing {}", comb);
-                self.key_grabbing(comb.key, comb.modifiers, KeyGrabbing::Grab)?;
+        if let Some(root_key) = &self.opt.root_key {
+            'x: for (comb, _action) in self.config.map.iter() {
+                for key in comb.split(",") {
+                    if root_key == key {
+                        let comb = Combination::parse(key)?;
+                        root_key_hit = Some(KeyTreeEvent::KeyPress {
+                            key: comb.key,
+                            state: self.mask_to_x11(comb.modifiers),
+                        });
+                        break 'x;
+                    }
+                }
+            }
+        } else {
+            // Grab root keys
+            for (comb, _action) in self.config.map.iter() {
+                for key in comb.split(",") {
+                    let comb = Combination::parse(key)?;
+                    println!("Grabbing {}", comb);
+                    self.key_grabbing(comb.key, comb.modifiers, KeyGrabbing::Grab)?;
+                }
             }
         }
 
@@ -266,13 +282,15 @@ impl Main {
                 }
             }
 
-            let event = if let Some(event) = self.conn.poll_for_event() {
+            let event = if let Some(event) = root_key_hit.take() {
                 event
+            } else if let Some(event) = self.conn.poll_for_event() {
+                self.classify_event(&event)
             } else {
                 continue;
             };
 
-            match self.classify_event(&event) {
+            match event {
                 KeyTreeEvent::ConfigureNotify { event } => {
                     for win in [&win, &error_win] {
                         if let Some(win) = win {
@@ -383,6 +401,9 @@ impl Main {
                         if let Some(win) = &win {
                             log::debug!("Destroying window");
                             win.destroy(&self.conn)?;
+                        }
+                        if self.opt.root_key.is_some() {
+                            running = false;
                         }
                         key_map = self.config.map.clone();
                     } else if let Some((take_focus, display_text)) = take_focus {
