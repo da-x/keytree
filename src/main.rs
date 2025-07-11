@@ -87,6 +87,10 @@ enum KeyTreeEvent {
     },
     #[allow(unused)]
     Other(u8),
+
+    #[allow(unused)]
+    MapNotify { notify_win: u32 },
+
     #[allow(unused)]
     UnmapNotify { event: u32 },
 }
@@ -322,6 +326,22 @@ impl Main {
             };
 
             match event {
+                KeyTreeEvent::MapNotify { notify_win } => {
+                    if let Some(win) = &win {
+                        if win.id() == notify_win {
+                            win.draw(&self.conn)?;
+                            self.conn.flush();
+
+                            xcb::set_input_focus(
+                                &self.conn,
+                                xcb::INPUT_FOCUS_POINTER_ROOT as u8,
+                                win.id(),
+                                xcb::CURRENT_TIME,
+                            ).request_check()?;
+                            self.conn.flush();
+                        }
+                    }
+                },
                 KeyTreeEvent::FocusOut { win_focused } => {
                     if let Some(win) = &win {
                         if win.id() == win_focused {
@@ -606,6 +626,10 @@ impl Main {
             xcb::UNMAP_NOTIFY => {
                 let event: &xcb::UnmapNotifyEvent = unsafe { xcb::cast_event(event) };
                 KeyTreeEvent::UnmapNotify { event: event.event() }
+            }
+            xcb::MAP_NOTIFY => {
+                let event: &xcb::MapNotifyEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::MapNotify { notify_win: event.event() }
             }
             xcb::EXPOSE => {
                 let event: &xcb::ExposeEvent = unsafe { xcb::cast_event(event) };

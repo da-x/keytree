@@ -106,31 +106,6 @@ impl Window {
             text: text.clone(),
         };
 
-        // Poll for MAP_NOTIFY event
-        loop {
-            if let Some(event) = conn.wait_for_event() {
-                let r = event.response_type() & !0x80;
-                match r {
-                    xcb::MAP_NOTIFY => {
-                        break;
-                    }
-                    _ => {},
-                }
-            }
-        }
-
-        win.draw(&conn)?;
-        conn.flush();
-
-        xcb::set_input_focus(
-            &conn,
-            xcb::INPUT_FOCUS_POINTER_ROOT as u8,
-            win.id,
-            xcb::CURRENT_TIME,
-        )
-        .request_check()?;
-        conn.flush();
-
         Ok(win)
     }
 
