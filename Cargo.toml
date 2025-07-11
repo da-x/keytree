@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 cairo-rs = { version = "0.9", features = ["xcb"] }
 cairo-sys-rs = { version = "0.10", features = ["xcb"] }
-config = "0.10"
+config = "0.13.2"
 dirs = "3"
 error-chain = "0.11.0"
 image = "0.18.0"

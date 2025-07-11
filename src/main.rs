@@ -6,6 +6,7 @@ use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use ::config::builder::DefaultState;
 use structopt::StructOpt;
 use xcb::Connection;
 
@@ -147,9 +148,12 @@ impl Main {
             config_path.to_str().unwrap(),
             config_crate::FileFormat::Yaml,
         );
-        let mut settings = config_crate::Config::default();
-        settings.merge(file)?;
-        let config = settings.try_into::<Config>()?;
+
+        let settings = config_crate::ConfigBuilder::<DefaultState>::default()
+            .add_source(file)
+            .add_source(config_crate::Environment::with_prefix("KEYTREE_CONFIG_"))
+            .build();
+        let config = settings?.try_deserialize::<Config>()?;
         Ok(config)
     }
 
