@@ -62,7 +62,8 @@ impl Window {
                     xcb::CW_EVENT_MASK,
                     xcb::EVENT_MASK_EXPOSURE
                         | xcb::EVENT_MASK_STRUCTURE_NOTIFY
-                        | xcb::EVENT_MASK_KEY_PRESS,
+                        | xcb::EVENT_MASK_KEY_PRESS
+                        | xcb::EVENT_MASK_FOCUS_CHANGE,
                 ),
             ],
         )

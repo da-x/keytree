@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use ::config::builder::DefaultState;
 use structopt::StructOpt;
 use xcb::Connection;
@@ -61,9 +61,14 @@ enum KeyGrabbing {
     Ungrab,
 }
 
+#[derive(Debug)]
 enum KeyTreeEvent {
     ConfigureNotify {
         event: u32,
+    },
+    #[allow(unused)]
+    Expose {
+        win: u32,
     },
     KeyPress {
         key: KeySym,
@@ -72,7 +77,18 @@ enum KeyTreeEvent {
     DestroyNotify {
         event: u32,
     },
-    Other,
+    #[allow(unused)]
+    FocusOut {
+        win_focused: u32,
+    },
+    #[allow(unused)]
+    FocusIn {
+        win: u32,
+    },
+    #[allow(unused)]
+    Other(u8),
+    #[allow(unused)]
+    UnmapNotify { event: u32 },
 }
 
 impl Main {
@@ -273,8 +289,19 @@ impl Main {
         let mut error_start: Option<std::time::Instant> = None;
         let mut prev_focus = None;
         let mut running = true;
+        let mut last_focus_out: Option<Instant> = None;
 
         while running || win.is_some() {
+            if let Some(last_focus_out) = &last_focus_out {
+                if last_focus_out.elapsed() > std::time::Duration::from_millis(30) {
+                    if let Some(win) = &win {
+                        log::debug!("Timeout after lost focus");
+                        win.destroy(&self.conn)?;
+                    }
+                    running = false;
+                }
+            }
+
             std::thread::sleep(Duration::from_millis(10));
 
             if let Some(error_start_v) = error_start {
@@ -295,6 +322,22 @@ impl Main {
             };
 
             match event {
+                KeyTreeEvent::FocusOut { win_focused } => {
+                    if let Some(win) = &win {
+                        if win.id() == win_focused {
+                            last_focus_out = Some(std::time::Instant::now());
+                        }
+                    }
+                },
+                KeyTreeEvent::UnmapNotify { event: _ } => {},
+                KeyTreeEvent::FocusIn { win: win_focused } => {
+                    if let Some(win) = &win {
+                        if win.id() == win_focused {
+                            last_focus_out = None;
+                        }
+                    }
+                },
+                KeyTreeEvent::Expose { win: _ } => {},
                 KeyTreeEvent::ConfigureNotify { event } => {
                     for win in [&win, &error_win] {
                         if let Some(win) = win {
@@ -418,6 +461,7 @@ impl Main {
                             let r = data.get_reply()?;
                             prev_focus = Some((r.focus(), r.revert_to()));
                             win = Some(Window::new(self, &display_text)?);
+                            last_focus_out = None;
                         }
                         key_map = take_focus.clone();
                     }
@@ -442,7 +486,7 @@ impl Main {
                         }
                     }
                 }
-                KeyTreeEvent::Other => {}
+                KeyTreeEvent::Other(_) => {}
             }
         }
 
@@ -559,6 +603,14 @@ impl Main {
                 let event: &xcb::ConfigureNotifyEvent = unsafe { xcb::cast_event(event) };
                 KeyTreeEvent::ConfigureNotify { event: event.event() }
             }
+            xcb::UNMAP_NOTIFY => {
+                let event: &xcb::UnmapNotifyEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::UnmapNotify { event: event.event() }
+            }
+            xcb::EXPOSE => {
+                let event: &xcb::ExposeEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::Expose { win: event.window() }
+            }
             xcb::KEY_PRESS => {
                 let event: &xcb::KeyPressEvent = unsafe { xcb::cast_event(event) };
                 let key = self.keycode_to_keysym[event.detail() as usize];
@@ -570,7 +622,15 @@ impl Main {
                 let event: &xcb::DestroyNotifyEvent = unsafe { xcb::cast_event(event) };
                 KeyTreeEvent::DestroyNotify { event: event.event() }
             }
-            _ => KeyTreeEvent::Other,
+            xcb::FOCUS_OUT => {
+                let event: &xcb::FocusOutEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::FocusOut { win_focused: event.event() }
+            }
+            xcb::FOCUS_IN => {
+                let event: &xcb::FocusInEvent = unsafe { xcb::cast_event(event) };
+                KeyTreeEvent::FocusIn { win: event.event() }
+            }
+            _ => KeyTreeEvent::Other(r),
         }
     }
 }
