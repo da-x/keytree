@@ -3,9 +3,10 @@ extern crate error_chain;
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use ::config::builder::DefaultState;
 use structopt::StructOpt;
 use xcb::Connection;
@@ -306,8 +307,6 @@ impl Main {
                 }
             }
 
-            std::thread::sleep(Duration::from_millis(10));
-
             if let Some(error_start_v) = error_start {
                 if error_start_v.elapsed() >= std::time::Duration::from_millis(1000) {
                     if let Some(error_win) = &error_win {
@@ -322,6 +321,12 @@ impl Main {
             } else if let Some(event) = self.conn.poll_for_event() {
                 self.classify_event(&event)
             } else {
+                use nix::poll::{poll, PollFd, PollFlags};
+                let raw = self.conn.as_raw_fd();
+                let borrowed: BorrowedFd = unsafe { BorrowedFd::borrow_raw(raw) };
+                let mut fds = [PollFd::new(borrowed, PollFlags::POLLIN)];
+                let timeout = if last_focus_out.is_some() { 1u16 } else { 100 };
+                let _nready = poll(&mut fds, timeout).expect("poll() failed");
                 continue;
             };
 
