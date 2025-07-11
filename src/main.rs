@@ -300,10 +300,12 @@ impl Main {
             if let Some(last_focus_out) = &last_focus_out {
                 if last_focus_out.elapsed() > std::time::Duration::from_millis(30) {
                     if let Some(win) = &win {
-                        log::debug!("Timeout after lost focus");
-                        win.destroy(&self.conn)?;
+                        if self.opt.root_key.is_some() {
+                            log::debug!("Timeout after lost focus");
+                            win.destroy(&self.conn)?;
+                            running = false;
+                        }
                     }
-                    running = false;
                 }
             }
 
