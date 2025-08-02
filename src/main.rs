@@ -453,7 +453,7 @@ impl Main {
                                             Err(err) => {
                                                 let text = format!("{}", err);
                                                 if error_win.is_none() {
-                                                    error_win = Some(Window::new(self, &text)?);
+                                                    error_win = Some(Window::new(self, &text, "keytree")?);
                                                     error_start = Some(std::time::Instant::now());
                                                 }
                                                 break;
@@ -487,7 +487,7 @@ impl Main {
                             let data = xcb::get_input_focus(&self.conn);
                             let r = data.get_reply()?;
                             prev_focus = Some((r.focus(), r.revert_to()));
-                            win = Some(Window::new(self, &display_text)?);
+                            win = Some(Window::new(self, &display_text, "keytree")?);
                             last_focus_out = None;
                         }
                         key_map = take_focus.clone();

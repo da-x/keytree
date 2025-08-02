@@ -21,7 +21,7 @@ impl Window {
         self.id
     }
 
-    pub(crate) fn new(main: &crate::Main, text: &str) -> Result<Window, Error> {
+    pub(crate) fn new(main: &crate::Main, text: &str, class_str: &str) -> Result<Window, Error> {
         let conn = main.conn.clone();
         let setup = conn.get_setup();
         let screen = setup.roots().nth(main.screen_num as usize).unwrap();
@@ -70,6 +70,23 @@ impl Window {
         .request_check()?;
 
         conn.flush();
+
+        // Set WM_CLASS property: instance and class, both null-terminated
+        let wm_class = format!("{}\0{}\0", class_str, class_str);
+        let wm_class = wm_class.as_bytes();
+        let wm_class_atom = xcb::intern_atom(&conn, false, "WM_CLASS")
+            .get_reply()
+            .map(|r| r.atom())
+            .unwrap_or(xcb::ATOM_STRING);
+        xcb::change_property(
+            &conn,
+            xcb::PROP_MODE_REPLACE as u8,
+            win,
+            wm_class_atom,
+            xcb::ATOM_STRING,
+            8,
+            wm_class,
+        );
 
         let gcontext = leechbar::util::window::create_gc_32(&conn, win)?;
         let geometry = leechbar::util::Geometry::new(0, 0, text_width, text_height);
