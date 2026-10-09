@@ -1,5 +1,5 @@
+use crate::error::Error;
 use crate::keysym::{self, KeySym};
-use crate::Error;
 
 pub type KeyCombination = String;
 
