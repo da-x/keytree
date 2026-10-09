@@ -202,12 +202,12 @@ fn list_markup(map: &HashMap<KeyCombination, ActionDesc>) -> String {
     for (key, value) in entries {
         text.push('\n');
         text.push_str(&format!(
-            "<span foreground=\"#f2f4f8\" weight=\"semibold\">{}</span>",
+            "<span foreground=\"#f2f4f8\" weight=\"semibold\">{}</span>\t",
             escape_markup(key)
         ));
         if !value.title.is_empty() {
             text.push_str(&format!(
-                "<span foreground=\"#c5cad3\">  —  {}</span>",
+                "<span foreground=\"#c5cad3\">{}</span>",
                 escape_markup(&value.title)
             ));
         }
@@ -278,6 +278,8 @@ mod tests {
                 assert!(files < reload && reload < sub);
                 assert!(markup.contains("Next keys:"));
                 assert!(markup.contains("#f2f4f8"));
+                assert!(markup.contains('\t'));
+                assert!(!markup.contains('—'));
             }
             other => panic!("expected a help list, got {:?}", other),
         }
@@ -308,5 +310,10 @@ mod tests {
         assert!(markup.contains("a&lt;b"));
         assert!(markup.contains("Fish &amp; chips"));
         assert!(!markup.contains("a<b"));
+        let row = markup.lines().find(|line| line.contains("a&lt;b")).unwrap();
+        let tab = row.find('\t').unwrap();
+        assert!(row[..tab].contains("a&lt;b"));
+        assert!(row[tab + 1..].contains("Fish &amp; chips"));
+        assert!(!row.contains('—'));
     }
 }

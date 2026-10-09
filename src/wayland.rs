@@ -549,7 +549,13 @@ impl App {
             .unwrap_or(1)
             .max(1);
 
-        let mut panel = draw::render(markup, &self.session.opt.font, scale)?;
+        let max_logical_height = draw::max_window_height(area.rect.h);
+        let mut panel = draw::render(
+            markup,
+            &self.session.opt.font,
+            scale,
+            Some(max_logical_height),
+        )?;
         let mut origin = card_origin(&self.session.opt.position, &panel, &area.rect)?;
         let mut output = pick_output(&outputs, &area.output_ids, origin, &panel)
             .cloned()
@@ -560,14 +566,24 @@ impl App {
                 break;
             }
             scale = output.scale.max(1);
-            panel = draw::render(markup, &self.session.opt.font, scale)?;
+            panel = draw::render(
+                markup,
+                &self.session.opt.font,
+                scale,
+                Some(max_logical_height),
+            )?;
             origin = card_origin(&self.session.opt.position, &panel, &area.rect)?;
             output = pick_output(&outputs, &area.output_ids, origin, &panel)
                 .cloned()
                 .ok_or(Error::NoScreenFound)?;
         }
         if output.scale.max(1) != panel.scale {
-            panel = draw::render(markup, &self.session.opt.font, output.scale.max(1))?;
+            panel = draw::render(
+                markup,
+                &self.session.opt.font,
+                output.scale.max(1),
+                Some(max_logical_height),
+            )?;
             origin = card_origin(&self.session.opt.position, &panel, &area.rect)?;
         }
 

@@ -10,6 +10,20 @@ const RADIUS: f64 = 14.0;
 const BLUR_LOGICAL: f64 = 22.0;
 const OFFSET_Y_LOGICAL: f64 = 8.0;
 const SHADOW_OPACITY: f32 = 0.45;
+/// Largest point size the overlay will use, including when `--font` asks for more.
+const MAX_POINT_SIZE: i32 = 36;
+/// Smallest point size used when a long list must shrink to fit the screen.
+const MIN_POINT_SIZE: i32 = 11;
+/// Gutter between the key and description columns, as a fraction of an em.
+const GUTTER_EM: f64 = 0.75;
+
+/// Tallest logical window for a screen or workspace `screen_h` pixels high.
+///
+/// The limit includes the shadow margin around the card.
+pub(crate) fn max_window_height(screen_h: i32) -> i32 {
+    let screen_h = screen_h.max(0) as i64;
+    (screen_h * 80 / 100) as i32
+}
 
 pub(crate) struct Panel {
     pub logical_width: i32,
@@ -23,7 +37,12 @@ pub(crate) struct Panel {
     pub buf_height: i32,
 }
 
-pub(crate) fn render(markup: &str, font_spec: &str, scale: i32) -> Result<Panel, Error> {
+pub(crate) fn render(
+    markup: &str,
+    font_spec: &str,
+    scale: i32,
+    max_logical_height: Option<i32>,
+) -> Result<Panel, Error> {
     let scale = scale.max(1);
     let shadow = SHADOW * scale;
     let pad = PAD * scale;
@@ -32,10 +51,15 @@ pub(crate) fn render(markup: &str, font_spec: &str, scale: i32) -> Result<Panel,
     let offset_y = (OFFSET_Y_LOGICAL * scale as f64).round() as i32;
 
     let measure = ImageSurface::create(Format::ARgb32, 1, 1).map_err(draw_err)?;
-    let layout = layout_for(&measure, markup, font_spec, scale)?;
-    let (text_w, text_h) = layout.pixel_size();
-    let text_w = text_w.max(1);
-    let text_h = text_h.max(1);
+    let text = fit_text(&measure, markup, font_spec, scale, max_logical_height)?;
+    debug_assert!(text.width >= 1 && text.height >= 1);
+    debug_assert!(text.gutter >= 0 && text.key_column_width >= 0);
+    debug_assert!(text
+        .runs
+        .iter()
+        .all(|run| { run.x >= 0 && run.y >= 0 && run.width >= 0 && run.baseline >= 0 }));
+    let text_w = text.width;
+    let text_h = text.height;
 
     let card_w = text_w + pad * 2;
     let card_h = text_h + pad * 2;
@@ -80,10 +104,16 @@ pub(crate) fn render(markup: &str, font_spec: &str, scale: i32) -> Result<Panel,
     cr.set_line_width(1.0);
     cr.stroke();
 
-    let layout = layout_for(&surface, markup, font_spec, scale)?;
+    let font = font_at(font_spec, text.point_size, scale);
     cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-    cr.move_to((shadow + pad) as f64, (shadow + pad) as f64);
-    pangocairo::functions::show_layout(&cr, &layout);
+    for run in &text.runs {
+        if run.markup.is_empty() {
+            continue;
+        }
+        let layout = layout_for(&surface, &run.markup, &font)?;
+        cr.move_to((shadow + pad + run.x) as f64, (shadow + pad + run.y) as f64);
+        pangocairo::functions::show_layout(&cr, &layout);
+    }
     drop(cr);
     surface.flush();
 
@@ -100,20 +130,269 @@ pub(crate) fn render(markup: &str, font_spec: &str, scale: i32) -> Result<Panel,
     })
 }
 
-fn layout_for(
+struct Run {
+    markup: String,
+    x: i32,
+    y: i32,
+    width: i32,
+    baseline: i32,
+}
+
+struct TextLayout {
+    width: i32,
+    height: i32,
+    point_size: i32,
+    gutter: i32,
+    key_column_width: i32,
+    runs: Vec<Run>,
+}
+
+struct CellMetrics {
+    width: i32,
+    height: i32,
+    baseline: i32,
+}
+
+enum Line {
+    Gap,
+    Block(String),
+    Row { key: String, desc: String },
+}
+
+enum Prepared {
+    Gap,
+    Block(CellMetrics, String),
+    Row {
+        key: CellMetrics,
+        key_markup: String,
+        desc: CellMetrics,
+        desc_markup: String,
+    },
+}
+
+/// Lines with a tab are a key/description row. The first tab is the column
+/// split. Any other line is one block, centered across the rows.
+fn parse_overlay(markup: &str) -> Vec<Line> {
+    markup
+        .split('\n')
+        .map(|line| {
+            if line.is_empty() {
+                Line::Gap
+            } else if let Some((key, desc)) = line.split_once('\t') {
+                Line::Row {
+                    key: key.to_owned(),
+                    desc: desc.to_owned(),
+                }
+            } else {
+                Line::Block(line.to_owned())
+            }
+        })
+        .collect()
+}
+
+fn fit_text(
     surface: &ImageSurface,
     markup: &str,
     font_spec: &str,
     scale: i32,
+    max_logical_height: Option<i32>,
+) -> Result<TextLayout, Error> {
+    let ceiling = point_ceiling(font_spec);
+    let at_ceiling = layout_text(surface, markup, font_spec, ceiling, scale)?;
+    let Some(limit) = max_logical_height else {
+        return Ok(at_ceiling);
+    };
+    if window_logical_height(at_ceiling.height, scale) <= limit {
+        return Ok(at_ceiling);
+    }
+    let floor = if ceiling < MIN_POINT_SIZE {
+        ceiling
+    } else {
+        MIN_POINT_SIZE
+    };
+    if floor >= ceiling {
+        return Ok(at_ceiling);
+    }
+
+    let mut best = layout_text(surface, markup, font_spec, floor, scale)?;
+    let mut lo = floor;
+    let mut hi = ceiling - 1;
+    while lo <= hi {
+        let mid = lo + (hi - lo + 1) / 2;
+        let candidate = layout_text(surface, markup, font_spec, mid, scale)?;
+        if window_logical_height(candidate.height, scale) <= limit {
+            best = candidate;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    Ok(best)
+}
+
+fn layout_text(
+    surface: &ImageSurface,
+    markup: &str,
+    font_spec: &str,
+    points: i32,
+    scale: i32,
+) -> Result<TextLayout, Error> {
+    let font = font_at(font_spec, points, scale);
+    let line_box = measure_cell(surface, "X", &font)?.height.max(1);
+    let mut prepared = Vec::new();
+    let mut key_column_width = 0;
+    let mut desc_column_width = 0;
+    let mut block_width = 0;
+
+    for line in parse_overlay(markup) {
+        match line {
+            Line::Gap => prepared.push(Prepared::Gap),
+            Line::Block(text) => {
+                let cell = measure_cell(surface, &text, &font)?;
+                block_width = block_width.max(cell.width);
+                prepared.push(Prepared::Block(cell, text));
+            }
+            Line::Row { key, desc } => {
+                let key_cell = measure_cell(surface, &key, &font)?;
+                let desc_cell = measure_cell(surface, &desc, &font)?;
+                key_column_width = key_column_width.max(key_cell.width);
+                desc_column_width = desc_column_width.max(desc_cell.width);
+                prepared.push(Prepared::Row {
+                    key: key_cell,
+                    key_markup: key,
+                    desc: desc_cell,
+                    desc_markup: desc,
+                });
+            }
+        }
+    }
+
+    let em = measure_cell(surface, "M", &font)?.width;
+    let gutter = if desc_column_width > 0 {
+        ((em as f64) * GUTTER_EM).round().max(1.0) as i32
+    } else {
+        0
+    };
+    let columns_width = key_column_width + gutter + desc_column_width;
+    let text_w = columns_width.max(block_width).max(1);
+    let col_left = (text_w - columns_width) / 2;
+
+    let mut runs = Vec::new();
+    let mut y = 0;
+    for item in prepared {
+        match item {
+            Prepared::Gap => y += line_box,
+            Prepared::Block(cell, text) => {
+                runs.push(Run {
+                    x: (text_w - cell.width) / 2,
+                    y,
+                    width: cell.width,
+                    baseline: cell.baseline,
+                    markup: text,
+                });
+                y += cell.height;
+            }
+            Prepared::Row {
+                key,
+                key_markup,
+                desc,
+                desc_markup,
+            } => {
+                let key_dy = (desc.baseline - key.baseline).max(0);
+                let desc_dy = (key.baseline - desc.baseline).max(0);
+                let row_h = (key_dy + key.height).max(desc_dy + desc.height).max(1);
+                runs.push(Run {
+                    x: col_left + key_column_width - key.width,
+                    y: y + key_dy,
+                    width: key.width,
+                    baseline: key.baseline,
+                    markup: key_markup,
+                });
+                runs.push(Run {
+                    x: col_left + key_column_width + gutter,
+                    y: y + desc_dy,
+                    width: desc.width,
+                    baseline: desc.baseline,
+                    markup: desc_markup,
+                });
+                y += row_h;
+            }
+        }
+    }
+
+    Ok(TextLayout {
+        width: text_w,
+        height: y.max(1),
+        point_size: points,
+        gutter,
+        key_column_width,
+        runs,
+    })
+}
+
+fn measure_cell(
+    surface: &ImageSurface,
+    markup: &str,
+    font: &FontDescription,
+) -> Result<CellMetrics, Error> {
+    if markup.is_empty() {
+        return Ok(CellMetrics {
+            width: 0,
+            height: 0,
+            baseline: 0,
+        });
+    }
+    let layout = layout_for(surface, markup, font)?;
+    let (width, height) = layout.pixel_size();
+    Ok(CellMetrics {
+        width: width.max(0),
+        height: height.max(0),
+        baseline: pango_pixels(layout.baseline()),
+    })
+}
+
+fn layout_for(
+    surface: &ImageSurface,
+    markup: &str,
+    font: &FontDescription,
 ) -> Result<pango::Layout, Error> {
     let cr = Context::new(surface);
     let layout = pangocairo::functions::create_layout(&cr)
         .ok_or_else(|| Error::Draw("Pango could not create a layout".to_owned()))?;
-    let mut font = FontDescription::from_string(font_spec);
-    scale_font(&mut font, scale);
-    layout.set_font_description(Some(&font));
+    layout.set_font_description(Some(font));
     layout.set_markup(markup);
     Ok(layout)
+}
+
+fn font_at(font_spec: &str, points: i32, scale: i32) -> FontDescription {
+    let mut font = FontDescription::from_string(font_spec);
+    font.set_size(points.saturating_mul(pango::SCALE));
+    scale_font(&mut font, scale);
+    font
+}
+
+fn point_ceiling(font_spec: &str) -> i32 {
+    let font = FontDescription::from_string(font_spec);
+    let size = font.size();
+    if size <= 0 {
+        return MAX_POINT_SIZE;
+    }
+    let points = if font.size_is_absolute() {
+        let px = pango_pixels(size);
+        ((px as i64) * 72 / 96) as i32
+    } else {
+        pango_pixels(size)
+    };
+    points.clamp(1, MAX_POINT_SIZE)
+}
+
+fn window_logical_height(text_h: i32, scale: i32) -> i32 {
+    let pad = PAD * scale;
+    div_ceil(text_h + pad * 2, scale) + SHADOW * 2
+}
+
+fn pango_pixels(units: i32) -> i32 {
+    units.saturating_add(pango::SCALE / 2) >> 10
 }
 
 fn scale_font(font: &mut FontDescription, scale: i32) {
@@ -306,11 +585,16 @@ impl FontExt for FontDescription {
 
 trait LayoutExt {
     fn pixel_size(&self) -> (i32, i32);
+    fn baseline(&self) -> i32;
 }
 
 impl LayoutExt for pango::Layout {
     fn pixel_size(&self) -> (i32, i32) {
         self.get_pixel_size()
+    }
+
+    fn baseline(&self) -> i32 {
+        self.get_baseline()
     }
 }
 
@@ -324,6 +608,7 @@ mod tests {
             "<span foreground=\"#f2f4f8\">Next keys</span>",
             "normal 25",
             1,
+            None,
         )
         .unwrap();
         assert!(panel.buf_width > panel.card_width);
@@ -339,10 +624,75 @@ mod tests {
 
     #[test]
     fn higher_scale_renders_more_physical_pixels() {
-        let low = render("Hi", "normal 18", 1).unwrap();
-        let high = render("Hi", "normal 18", 2).unwrap();
+        let low = render("Hi", "normal 18", 1, None).unwrap();
+        let high = render("Hi", "normal 18", 2, None).unwrap();
         assert!(high.buf_width > low.buf_width);
         assert_eq!(high.scale, 2);
+    }
+
+    #[test]
+    fn font_does_not_grow_past_the_cap() {
+        let capped = render("Hi", "normal 100", 1, None).unwrap();
+        let at_cap = render("Hi", "normal 36", 1, None).unwrap();
+        let smaller = render("Hi", "normal 18", 1, None).unwrap();
+        assert_eq!(capped.logical_height, at_cap.logical_height);
+        assert_eq!(capped.logical_width, at_cap.logical_width);
+        assert!(smaller.logical_height < at_cap.logical_height);
+    }
+
+    #[test]
+    fn font_shrinks_so_the_window_stays_within_the_limit() {
+        let many = (0..24)
+            .map(|i| format!("<span>k{i}</span>\t<span>action {i}</span>"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let loose = render(&many, "normal 36", 1, None).unwrap();
+        let limit = (loose.logical_height * 2 / 3).max(1);
+        let tight = render(&many, "normal 36", 1, Some(limit)).unwrap();
+        let floor = render(&many, "normal 11", 1, None).unwrap();
+        assert!(tight.logical_height < loose.logical_height);
+        assert!(tight.logical_height <= limit);
+        assert!(tight.logical_height >= floor.logical_height);
+    }
+
+    #[test]
+    fn keys_are_right_aligned_and_descriptions_left_aligned() {
+        let surface = ImageSurface::create(Format::ARgb32, 1, 1).unwrap();
+        let markup = "\
+<span weight=\"semibold\">c</span>\t<span>One</span>\n\
+<span weight=\"semibold\">Control</span>\t<span>Two</span>";
+        let text = layout_text(&surface, markup, "normal 36", 36, 1).unwrap();
+        let narrow = text
+            .runs
+            .iter()
+            .find(|run| run.markup.contains(">c<"))
+            .unwrap();
+        let wide = text
+            .runs
+            .iter()
+            .find(|run| run.markup.contains("Control"))
+            .unwrap();
+        assert!(wide.width > narrow.width);
+        assert_eq!(narrow.x + narrow.width, wide.x + wide.width);
+        assert_eq!(narrow.x + narrow.width, text.key_column_width);
+        let descs: Vec<_> = text
+            .runs
+            .iter()
+            .filter(|run| run.markup.contains("One") || run.markup.contains("Two"))
+            .collect();
+        assert_eq!(descs.len(), 2);
+        assert_eq!(descs[0].x, descs[1].x);
+        assert_eq!(descs[0].x, text.key_column_width + text.gutter);
+        assert!(text.gutter > 0);
+        assert_eq!(narrow.y + narrow.baseline, descs[0].y + descs[0].baseline);
+        assert_eq!(wide.y + wide.baseline, descs[1].y + descs[1].baseline);
+    }
+
+    #[test]
+    fn window_limit_is_eighty_percent_of_the_screen() {
+        assert_eq!(max_window_height(1000), 800);
+        assert_eq!(max_window_height(1080), 864);
+        assert_eq!(max_window_height(0), 0);
     }
 
     fn alpha_at(panel: &Panel, x: i32, y: i32) -> u8 {

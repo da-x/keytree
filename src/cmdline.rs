@@ -15,8 +15,11 @@ pub(crate) struct Opt {
     #[structopt(long, short = "r")]
     pub root_key: Option<String>,
 
-    /// Font to use (Pango font string, for example "normal 100" for big text)
-    #[structopt(long = "font", short = "n", default_value = "normal 25")]
+    /// Font to use (Pango description, for example "sans bold 36").
+    ///
+    /// The size is a ceiling. The overlay will not exceed 36pt, and it
+    /// shrinks so the window stays within 80% of the screen height.
+    #[structopt(long = "font", short = "n", default_value = "normal 36")]
     pub font: String,
 
     /// Card center inside the active workspace.

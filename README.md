@@ -21,7 +21,7 @@ bind = Menu, exec, keytree --root-key Menu
 
 `--position` (default `%50,%50`) is the card's center inside the active workspace. A percentage is a fraction of that workspace. A plain number is a pixel offset of the card center.
 
-`--font` is a Pango font description. The default is `normal 25`.
+`--font` is a Pango font description. The default is `normal 36`. That size is a ceiling, and the overlay will not go above 36pt. It uses the largest size that keeps the window within 80% of the active workspace height, and it will not go below 11pt.
 
 `keytree --show-example-config` prints a sample configuration. Its root key is `C-F6`.
 
