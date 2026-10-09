@@ -176,6 +176,11 @@ impl App {
         let pool =
             SlotPool::new(256 * 256 * 4, &shm).map_err(|err| Error::Wayland(err.to_string()))?;
 
+        // Both protocols refer to monitors with output_enter on wl_output objects
+        // this client has already bound. Hyprland's foreign-toplevel manager sends
+        // that event only while creating each toplevel, and does not repeat it when
+        // an output is bound later. Queue the output binds first.
+        let output_state = OutputState::new(globals, qh);
         let workspace_manager = match globals.bind(qh, 1..=1, WorkspaceManagerData) {
             Ok(manager) => Some(manager),
             Err(BindError::NotPresent) | Err(BindError::UnsupportedVersion) => None,
@@ -188,7 +193,7 @@ impl App {
         Ok(Self {
             registry_state: RegistryState::new(globals),
             seat_state: SeatState::new(globals, qh),
-            output_state: OutputState::new(globals, qh),
+            output_state,
             shm,
             compositor,
             layer_shell,
@@ -1190,6 +1195,61 @@ impl Dispatch2<zwlr_foreign_toplevel_handle_v1::ZwlrForeignToplevelHandleV1, App
                 proxy.destroy();
             }
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hyprland drops foreign-toplevel output_enter unless wl_output was bound first.
+    #[test]
+    fn activated_toplevel_names_a_bound_output() {
+        if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return;
+        }
+        let conn = match Connection::connect_to_env() {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let (globals, mut queue) = registry_queue_init::<App>(&conn).expect("registry");
+        let qh = queue.handle();
+        let event_loop: EventLoop<'static, App> = EventLoop::try_new().expect("event loop");
+        let mut app = App::new(&globals, &qh, event_loop.handle(), Session::blank())
+            .expect("wayland globals");
+        for _ in 0..3 {
+            queue.roundtrip(&mut app).expect("roundtrip");
+        }
+        if app.toplevel_manager.is_none() {
+            return;
+        }
+        let outputs = app.output_geoms();
+        let activated: Vec<_> = app
+            .toplevels
+            .values()
+            .filter(|toplevel| toplevel.activated)
+            .collect();
+        if activated.is_empty() || outputs.is_empty() {
+            return;
+        }
+        assert!(
+            activated.iter().any(|toplevel| {
+                toplevel
+                    .outputs
+                    .iter()
+                    .any(|id| outputs.iter().any(|output| output.id == *id))
+            }),
+            "an activated toplevel did not name a wl_output bound by this client"
+        );
+
+        if app.workspace_manager.is_some() && outputs.len() > 1 {
+            let focus = app.activated_output_ids();
+            let area = app.workspace_area(&outputs).expect("workspace area");
+            assert!(
+                area.output_ids.iter().any(|id| focus.contains(id)),
+                "active workspace did not cover the focused toplevel's output"
+            );
         }
     }
 }

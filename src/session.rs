@@ -153,6 +153,20 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+impl Session {
+    pub(crate) fn blank() -> Self {
+        use structopt::StructOpt;
+
+        Self::from_parts(
+            Opt::from_iter(["keytree"]),
+            Config {
+                map: HashMap::new(),
+            },
+        )
+    }
+}
+
 pub(crate) fn load_config(opt: &Opt) -> Result<Config, Error> {
     let config_path = if let Some(config) = &opt.config {
         config.clone()
